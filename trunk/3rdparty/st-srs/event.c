@@ -1194,6 +1194,11 @@ ST_HIDDEN int _st_epoll_pollset_add(struct pollfd *pds, int npds)
     return 0;
 }
 
+#ifdef DEBUG
+unsigned long long _g_st_nn_epoll_wait = 0;
+unsigned long long _g_st_nn_epoll_wait_zero = 0;
+#endif
+
 ST_HIDDEN void _st_epoll_dispatch(void)
 {
     st_utime_t min_timeout;
@@ -1210,6 +1215,11 @@ ST_HIDDEN void _st_epoll_dispatch(void)
     } else {
         min_timeout = (_ST_SLEEPQ->due <= _ST_LAST_CLOCK) ? 0 : (_ST_SLEEPQ->due - _ST_LAST_CLOCK);
         timeout = (int) (min_timeout / 1000);
+
+        // At least wait 1ms when <1ms, to avoid epoll_wait spin loop.
+        if (min_timeout > 0 && timeout == 0) {
+            timeout = 1;
+        }
     }
 
     if (_st_epoll_data->pid != getpid()) {
@@ -1234,6 +1244,13 @@ ST_HIDDEN void _st_epoll_dispatch(void)
 
     /* Check for I/O operations */
     nfd = epoll_wait(_st_epoll_data->epfd, _st_epoll_data->evtlist, _st_epoll_data->evtlist_size, timeout);
+
+#ifdef DEBUG
+    ++_g_st_nn_epoll_wait;
+    if (timeout <= 0 && min_timeout > 0) {
+        ++_g_st_nn_epoll_wait_zero;
+    }
+#endif
 
     if (nfd > 0) {
         for (i = 0; i < nfd; i++) {

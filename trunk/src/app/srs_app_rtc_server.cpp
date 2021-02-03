@@ -593,6 +593,13 @@ SrsRtcConnection* SrsRtcServer::find_session_by_username(const std::string& user
     return dynamic_cast<SrsRtcConnection*>(conn);
 }
 
+extern unsigned long long _g_st_nn_epoll_wait;
+extern unsigned long long _g_st_nn_epoll_wait_zero;
+unsigned long long _g_st_nn_epoll_wait_prev = 0;
+unsigned long long _g_st_nn_epoll_wait_zero_prev = 0;
+srs_utime_t _g_st_stat = 0;
+srs_utime_t _g_st_stat_zero = 0;
+
 srs_error_t SrsRtcServer::notify(int type, srs_utime_t interval, srs_utime_t tick)
 {
     srs_error_t err = srs_success;
@@ -630,12 +637,34 @@ srs_error_t SrsRtcServer::notify(int type, srs_utime_t interval, srs_utime_t tic
         return err;
     }
 
+    int diff_ps = 0;
+    srs_utime_t duration = srs_get_system_time() - _g_st_stat;
+    if (duration > 0) {
+        diff_ps = (_g_st_nn_epoll_wait - _g_st_nn_epoll_wait_prev) * SRS_UTIME_SECONDS / duration;
+        _g_st_nn_epoll_wait_prev = _g_st_nn_epoll_wait;
+        _g_st_stat = srs_get_system_time();
+    }
+
+    int diff_zero_bs = 0;
+    srs_utime_t duration_zero = srs_get_system_time() - _g_st_stat_zero;
+    if (duration_zero > 0) {
+        diff_zero_bs = (_g_st_nn_epoll_wait_zero - _g_st_nn_epoll_wait_zero_prev) * SRS_UTIME_SECONDS / duration_zero;
+        _g_st_nn_epoll_wait_zero_prev = _g_st_nn_epoll_wait_zero;
+        _g_st_stat_zero = srs_get_system_time();
+    }
+
+    float epoll_rate = 0;
+    if (diff_ps > 0) {
+        epoll_rate = 100.0 * diff_zero_bs / diff_ps;
+    }
+
     // Show statistics for RTC server.
     SrsProcSelfStat* u = srs_get_self_proc_stat();
     // Resident Set Size: number of pages the process has in real memory.
     int memory = (int)(u->rss * 4 / 1024);
     // TODO: FIXME: Show more data for RTC server.
-    srs_trace("RTC: Server conns=%u, cpu=%.2f%%, rss=%dMB", nn_rtc_conns, u->percent * 100, memory);
+    srs_trace("RTC: Server conns=%u, cpu=%.2f%%, rss=%dMB, epoll=%dps,%dps,%.2f%%",
+        nn_rtc_conns, u->percent * 100, memory, diff_ps, diff_zero_bs, epoll_rate);
 
     return err;
 }
